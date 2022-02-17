@@ -1,0 +1,353 @@
+---
+title: "개와 고양이"
+author: "오준서(조장), 이순규, 한호종, 유준"
+date: '2022 - 02 - 14'
+output: 
+  html_document :
+    toc : true
+    toc_float : true
+    theme : united
+---
+
+<style>
+#TOC{top:20%;}
+</style>
+
+
+```{r, include=FALSE}
+library(keras)
+```
+
+***
+
+주어진 사진들로 분류문제를 실행하고, 시각화한다.
+또한, 분류 정확성을 높이기위한 방법과 사용자가 조정할 수 있는 파라미터가 무엇인지 알아보도록 하겠다.
+
+***
+
+
+# 데이터 가져오기
+
+### 교육, 검증 및 테스트 디렉토리에 이미지 복사
+```{r, results='hide'}
+original_dataset_dir <- "C:\\Users\\You\\Downloads\\dogs-vs-cats\\train"
+base_dir <- "C:\\Users\\You\\Downloads\\dogs-vs-cats\\result"
+dir.create(base_dir)
+```
+
+***
+
+### 학습,검증,테스트 경로 생성
+```{r, results='hide'}
+train_dir <- file.path(base_dir, "train")
+validation_dir <- file.path(base_dir, "validation")
+test_dir <- file.path(base_dir, "test")
+train_cats_dir <- file.path(train_dir, "cats")
+train_dogs_dir <- file.path(train_dir, "dogs")
+validation_cats_dir <- file.path(validation_dir, "cats")
+validation_dogs_dir <- file.path(validation_dir, "dogs")
+test_cats_dir <- file.path(test_dir, "cats")
+test_dogs_dir <- file.path(test_dir, "dogs")
+```
+
+***
+
+### 파일 생성 뭉치기
+```{r, results='hide'}
+a <- c(train_dir,test_dir,validation_dir,train_cats_dir,train_dogs_dir,
+       validation_cats_dir,validation_dogs_dir,test_cats_dir,test_dogs_dir)
+lapply(a,dir.create)
+```
+
+***
+
+### 설정값 이미지파일 각각 분류
+```{r, results='hide'}
+fnames <- paste0("cat.", 2001:3000, ".jpg")
+file.copy(file.path(original_dataset_dir, fnames), 
+          file.path(train_cats_dir)) 
+
+fnames <- paste0("cat.", 3001:3500, ".jpg")
+file.copy(file.path(original_dataset_dir, fnames), 
+          file.path(validation_cats_dir))
+
+fnames <- paste0("cat.", 3501:4000, ".jpg")
+file.copy(file.path(original_dataset_dir, fnames),
+          file.path(test_cats_dir))
+
+fnames <- paste0("dog.", 4001:5000, ".jpg")
+file.copy(file.path(original_dataset_dir, fnames),
+          file.path(train_dogs_dir))
+
+fnames <- paste0("dog.", 5001:5500, ".jpg")
+file.copy(file.path(original_dataset_dir, fnames),
+          file.path(validation_dogs_dir)) 
+
+fnames <- paste0("dog.", 5501:6000, ".jpg")
+file.copy(file.path(original_dataset_dir, fnames),
+          file.path(test_dogs_dir))
+
+```
+
+***
+
+
+### 분류 데이터 개수 확인
+
+```{r, results='hide'}
+cat("total training cat images:", length(list.files(train_cats_dir)), "\n")
+cat("total training dog images:", length(list.files(train_dogs_dir)), "\n")
+cat("total validation cat images:", length(list.files(validation_cats_dir)), "\n")
+cat("total validation dog images:", length(list.files(validation_dogs_dir)), "\n")
+cat("total test cat images:", length(list.files(test_cats_dir)), "\n")
+cat("total test dog images:", length(list.files(test_dogs_dir)), "\n")
+```
+개와 고양이 사진을 train,validation,test image로 분류했으며 동일한 비율로 나뉜 것을 확인한다.
+
+***
+
+
+### model 파라미터 값 설정 
+```{r, results='hide'}
+model <- keras_model_sequential() %>% 
+  layer_conv_2d(filters = 32, kernel_size = c(4, 4), activation = "relu",
+                input_shape = c(150, 150, 3)) %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 64, kernel_size = c(4, 4), activation = "relu") %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 128, kernel_size = c(4, 4), activation = "relu") %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 128, kernel_size = c(4, 4), activation = "relu") %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_flatten() %>% 
+  layer_dense(units = 512, activation = "relu") %>% 
+  layer_dense(units = 1, activation = "sigmoid")
+
+summary(model)
+```
+
+filter 옵션은 filter의 개수를 정한다.
+layer_max_polling_2d 함수는 사소한 변화를 무시할 수 있게 해준다.
+무의미한 변화까지 모두 잡아내게 되면 시간도 오래 걸리고 정확도 또한 떨어질 것이다.
+여기서는 pool size를 (2,2)로 설정했기 때문에 출력 사진 크기는 입력 사진 크기의 반으로 줄어든다.
+
+각 층의 kernel_size는 (4,4)로 동일하며 convolution filter의 사이즈를 결정한다.
+
+여기서, activation은 대표적으로 다음과 같은 옵션들이 있다.
+
+‘linear’ : 입력뉴런과 가중치로 계산된 결과값이 그대로 출력으로 나옵니다.
+‘relu’ : rectifier 함수, 은익층에 주로 쓰입니다.
+‘sigmoid’ : 시그모이드 함수, 이진 분류 문제에서 출력층에 주로 쓰입니다.
+‘softmax’ : 소프트맥스 함수, 다중 클래스 분류 문제에서 출력층에 주로 쓰입니다.
+
+코드를 살펴보면 출력 직전까진 은닉층에 relu를 썻지만 최종적으로 결과를 출력할 땐
+이진분류에 주로 사용하는 시그모이드 함수를 적용한 것을 볼 수 있다.
+***
+
+### 학습을 위한 모델 구성
+```{r, results='hide'}
+model %>% compile(
+  loss = "binary_crossentropy",
+  optimizer = optimizer_rmsprop(lr = 1e-4),
+  metrics = c("acc")
+)
+```
+
+***
+
+
+### 이미지 사이즈 조정 및 데이터 타입 변경
+
+```{r, results='hide'}
+train_datagen <- image_data_generator(rescale = 1/255)
+validation_datagen <- image_data_generator(rescale = 1/255)
+
+train_generator <- flow_images_from_directory(
+  train_dir,
+  train_datagen,
+  target_size = c(150, 150),
+  batch_size = 20,
+  class_mode = "binary"
+)
+
+validation_generator <- flow_images_from_directory(
+  validation_dir,
+  validation_datagen,
+  target_size = c(150, 150),
+  batch_size = 20,
+  class_mode = "binary"
+)
+```
+
+***
+
+
+### 배치 생성기를 사용하여 모델 피팅
+```{r, results='hide'}
+batch <- generator_next(train_generator)
+str(batch)
+
+history <- model %>% fit_generator(
+  train_generator,
+  steps_per_epoch = 100,
+  epochs = 30,
+  validation_data = validation_generator,
+  validation_steps = 50
+)
+
+```
+
+
+***
+
+
+### 모델 저장
+```{r, results='hide'}
+model %>% save_model_hdf5("cats_and_dogs_small_1.h5")
+```
+h5형식의 확장자는 대용량의 파일을 효과적으로 저장할 수 있게 해준다.
+***
+
+### 시각화
+```{r, results='hide'}
+plot(history)
+```
+
+
+***
+
+### 데이터 보강 구상 설정
+```{r, results='hide'}
+datagen <- image_data_generator(
+  rescale = 1/255,
+  rotation_range = 40,
+  width_shift_range = 0.2,
+  height_shift_range = 0.2,
+  shear_range = 0.2,
+  zoom_range = 0.2,
+  horizontal_flip = TRUE,
+  fill_mode = "nearest"
+)
+```
+
+
+
+***
+
+
+### 무작위로 보강된 훈련 이미지 표시
+```{r, results='hide'}
+fnames <- list.files(train_cats_dir, full.names = TRUE)
+img_path <- fnames[[3]]
+
+img <- image_load(img_path, target_size = c(150, 150))
+img_array <- image_to_array(img)
+img_array <- array_reshape(img_array, c(1, 150, 150, 3))
+
+augmentation_generator <- flow_images_from_data(
+  img_array,
+  generator = datagen, 
+  batch_size = 1
+)
+
+op <- par(mfrow = c(2, 2), pty = "s", mar = c(1, 0, 1, 0))
+for (i in 1:4) {
+  batch <- generator_next(augmentation_generator)
+  plot(as.raster(batch[1,,,]))
+}
+par(op)
+
+```
+
+
+
+***
+
+
+### 드롭아웃을 포함하는 새 convnet 정의
+```{r, results='hide'}
+model <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3, 3), activation = "relu",
+                input_shape = c(150, 150, 3)) %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_flatten() %>%
+  layer_dropout(rate = 0.5) %>%
+  layer_dense(units = 512, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+model %>% compile(
+  loss = "binary_crossentropy",
+  optimizer = optimizer_rmsprop(lr = 1e-4),
+  metrics = c("acc")
+)
+
+```
+
+***
+
+
+### 데이터 증대 생성기를 사용하여 convnet 훈련
+```{r, results='hide'}
+datagen <- image_data_generator(
+  rescale = 1/255,
+  rotation_range = 40,
+  width_shift_range = 0.2,
+  height_shift_range = 0.2,
+  shear_range = 0.2,
+  zoom_range = 0.2,
+  horizontal_flip = TRUE
+)
+test_datagen <- image_data_generator(rescale = 1/255)
+train_generator <- flow_images_from_directory(
+  train_dir, 
+  datagen, 
+  target_size = c(150, 150), 
+  batch_size = 32, 
+  class_mode = "binary"
+)
+validation_generator <- flow_images_from_directory(
+  validation_dir,
+  test_datagen,
+  target_size = c(150, 150),
+  batch_size = 32,
+  class_mode = "binary"
+)
+history1 <- model %>% fit_generator(
+  train_generator,
+  steps_per_epoch = 100,
+  epochs = 100,
+  validation_data = validation_generator,
+  validation_steps = 50
+)
+
+```
+
+***
+
+
+### 모델 저장 밑 시각화
+```{r, results='hide'}
+model %>% save_model_hdf5("cats_and_dogs_small_2.h5")
+
+plot(history1)
+
+```
+
+***
+
+### 결론
+딥러닝 모델을 통해 이항분류를 하고자 할 때, epoch의 수와 steps의 수를 
+데이터의 사이즈에 맞게 최적화 해주어야 정확한 예측을 할 수 있다.
+너무 적은 steps 수를 설정하면 무의미한 반복에 그칠 수 있고,
+너무 많은 steps 수를 설정하면 모델이 작동하지 않는다.
+
+
+***
+
+### 참조
+

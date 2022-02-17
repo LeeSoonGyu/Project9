@@ -1,0 +1,464 @@
+---
+title: "Keras 다중 선형회귀"
+author: "tester"
+date: '2022 2 9 '
+output: 
+  html_document :
+    toc : true
+    toc_float : true
+    theme : journal
+---
+
+<style>
+#TOC{top:20%;}
+</style>
+
+
+***
+이번 포트폴리오에서는 Keras패키지를 사용하여 다중선형회귀를 하고, R 내장 회귀함수와 결과를 비교하고자 한다.
+
+***
+```{r, include=FALSE}
+library(tensorflow)
+library(keras)
+library(dplyr)
+library(tfdatasets)
+library(caret)
+library(dplyr)
+library(ggplot2)
+library(lmtest)
+library(car)
+```
+
+
+# 보스턴 주택 가격 데이터셋 {.tabset}
+```{r, include = F}
+boston <- dataset_boston_housing()
+c(train_data, train_labels) %<-% boston$train
+c(test_data, test_labels) %<-% boston$test
+
+column_names <- c('CRIM', 'ZN', 'INDUS', 'CHAS', 'NOX', 'RM', 'AGE', 
+                  'DIS', 'RAD', 'TAX', 'PTRATIO', 'B', 'LSTAT')
+
+train_df <- train_data %>% 
+  as_tibble(.name_repair = "minimal") %>% 
+  setNames(column_names) %>% 
+  mutate(label = train_labels)
+
+test_df <- test_data %>% 
+  as_tibble(.name_repair = "minimal") %>% 
+  setNames(column_names) %>% 
+  mutate(label = test_labels)
+
+paste0("Training entries: ", length(train_data), ", labels: ", length(train_labels))
+```
+
+```{r}
+train_df
+test_df
+```
+### 보스턴 시의 주택 가격에 대한 데이터
+
+#### 총 506개의 행과 12개의 열, 마지막 열인 label(집값)이 종속변수로 설정.
+
+#### 1. CRIM - 도시별 1인당 범죄율
+
+#### 2. ZN - 25,000평방피트 이상의 부지로 구획된 주거용 토지의 비율.
+
+#### 3. INDUS - 도시당 비소매업 에이커 비율.
+
+#### 4. CHAS - Charles River 더미 변수(트랙 경계가 강인 경우 1, 그렇지 않은 경우 0)
+
+#### 5. NOX - 산화질소 농도(1000만분의 1)
+
+#### 6. RM - 주택당 평균 방 수
+
+#### 7. AGE - 1940년 이전에 지어진 소유주가 차지하는 비율
+
+#### 8. DIS - 5개의 보스턴 고용 센터까지의 가중 거리
+
+#### 9. RAD - 방사형 고속도로에 대한 접근성 지수
+
+#### 10. TAX - $10,000당 전체 가치 재산세율
+
+#### 11. PTRATIO - 도시별 학생-교사 비율
+
+#### 12. B - 1000(Bk - 0.63)^2 여기서 Bk는 도시별 흑인 비율입니다.
+
+#### 13. LSTAT - 인구의 낮은 상태 %
+
+#### 14. label - $1000의 소유자가 거주하는 주택의 중간 가치
+
+***
+
+# Python - keras패키지 다중 회귀 함수
+```{python, include = F}
+import numpy as np
+from keras.datasets import boston_housing
+import pandas as pd
+from keras.models import Sequential
+from keras.layers import Dense
+from tensorflow.keras.optimizers import Adam
+from keras.callbacks import EarlyStopping
+import matplotlib.pyplot as plt
+
+(train_data, train_targets), (test_data, test_targets) = boston_housing.load_data()
+```
+
+### 데이터 생성
+```{python}
+(train_data, train_targets), (test_data, test_targets) = boston_housing.load_data()
+
+column_names = ['CRIM', 'ZN', 'INDUS', 'CHAS', 'NOX', 'RM', 'AGE', 'DIS', 'RAD', 'TAX', 'PTRATIO', 'B', 'LSTAT']
+df = pd.DataFrame(train_data, columns=column_names)
+df.head()
+```
+
+***
+
+### 표준화
+```{python, include = T}
+df1 = df.loc[:,df.columns !='CHAS']
+train_data = np.array(df1)
+
+
+df2 = pd.DataFrame(test_data, columns=column_names)
+df2 = df2.loc[:,df2.columns !='CHAS']
+test_data = np.array(df2)
+
+mean = train_data.mean(axis=0)
+train_data -= mean
+std = train_data.std(axis=0)
+train_data /= std
+
+test_data -= mean
+test_data /= std
+```
+
+서로 다른 범위를 갖고 있다면, 직접적인 비교가 어렵기 때문에 이를 동일한 범위를 갖도록 해주는 작업.
+
+테스트 데이터를 정규화할 때 사용한 값이 훈련 데이터에서 계산한 값임을 주목하세요. 
+
+머신 러닝 작업 과정에서 절대로 테스트 데이터에서 계산한 어떤 값도 사용해서는 안 됩니다
+
+각각 다른 스케일로 변환하게 되면 훈련데이터에서 학습한 정보가 쓸모없게 되는 것이다.
+
+***
+
+### 훈련, 검증 데이터 순서 섞기
+```{python}
+order = np.argsort(np.random.random(train_targets.shape))
+train_targets = train_targets[order]
+train_data = train_data[order]
+```
+
+학습을 할 때, 비슷한 데이터들을 연속해서 학습하게 되면 편항이 된다.
+
+따라서 학습 데이터들을 적절하게 섞어주는 것이 필요함.
+
+***
+
+### 모델생성
+```{python}
+model = Sequential()
+model.add(Dense(64, activation='relu', input_shape=(train_data.shape[1],)))
+model.add(Dense(64, activation='relu'))
+model.add(Dense(1))
+```
+
+입력 레이어, 히든 레이어, 출력 레이어 각 1개씩 전결합 (Fully-Connected) 레이어로 만들었다.
+
+활성화 함수로는 ReLU를 사용했다.
+
+***
+
+### 컴파일링
+```{python, message = F}
+model.compile(loss='mse', optimizer=Adam(lr=0.001), metrics=['mae'])
+```
+
+손실 함수로는 MSE (Mean Square Error) 함수를 사용했고, 최적화 함수로는 학습률 0.001의 Adam을 사용했다.
+
+평가 지표로는 MAE (Mean Absolute Error)를 사용했다.
+
+***
+
+### 모델 훈련
+```{python, include = F}
+early_stop = EarlyStopping(monitor='val_loss', patience=20)
+history = model.fit(train_data, train_targets, epochs=500, validation_split=0.2, callbacks=[early_stop])
+```
+```{python, eval = F}
+early_stop = EarlyStopping(monitor='val_loss', patience=20)
+history = model.fit(train_data, train_targets, epochs=500, validation_split=0.2, callbacks=[early_stop])
+```
+
+EarlyStopping은 지정한 epoch만큼 반복하는 동안 학습 오차에 개선이 없다면 자동으로 학습을 종료함.
+
+val_loss를 모니터링하여 20번의 epoch동안 개선이 없다면 종료하게 된다.
+
+이것을 fit 메소드에 넘겨주어 학습을 하는 동안 사용을 하게 된다.
+
+***
+
+### 훈련 결과 시각화
+```{python, message=F}
+plt.plot(history.history['mae'], label='train mae')
+plt.plot(history.history['val_mae'], label='val mae')
+plt.xlabel('epoch')
+plt.ylabel('mae [$1,000]')
+plt.legend(loc='best')
+```
+
+***
+
+### 모델 예측
+```{python}
+test_predictions = model.predict(test_data).flatten()
+```
+
+예측했다
+
+
+***
+
+### 비교 시각화
+```{python, include = F}
+plt.scatter(test_targets, test_predictions)
+plt.xlabel('test_targets')
+plt.ylabel('test_predictions')
+plt.axis('equal')
+plt.axis('square')
+plt.xlim([0,plt.xlim()[1]])
+plt.ylim([0,plt.ylim()[1]])
+_ = plt.plot([-100, 100], [-100, 100])
+```
+
+
+### 모델 평가
+```{python}
+test_loss, test_mae = model.evaluate(test_data, test_targets)
+```
+
+mae(평균절대오차)가 2.5575 이므로 평균적으로 2,558 달러 정도의 오차 범위 내에서 예측하고 있다.
+
+***
+
+# R - keras패키지 다중 회귀 함수
+### 표준화
+```{r}
+spec <- feature_spec(train_df, label ~ . ) %>% 
+  step_numeric_column(all_numeric(), normalizer_fn = scaler_standard()) %>% 
+  fit()
+
+spec
+
+```
+
+표준화 진행
+
+***
+
+### 모델생성
+```{r}
+input <- layer_input_from_dataset(train_df %>% select(-label))
+
+output <- input %>% 
+  layer_dense_features(dense_features(spec)) %>% 
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 1) 
+
+model <- keras_model(input, output)
+summary(model)
+```
+
+모델 생성했다
+
+***
+
+### 컴파일링
+
+```{r}
+model <-  model %>% 
+  compile(
+    loss = "mse",
+    optimizer = optimizer_adam(learning_rate = 0.001),
+    metrics = list("mean_absolute_error")
+  )
+```
+
+컴파일링했다.
+
+***
+
+### 모델 훈련
+```{r}
+early_stop <- callback_early_stopping(monitor = "val_loss", patience = 20)
+
+history <- model %>% fit(
+  x = train_df %>% select(-label),
+  y = train_df$label,
+  epochs = 500,
+  validation_split = 0.2,
+  verbose = 0,
+  callbacks = list(early_stop)
+)
+```
+
+훈련했다
+
+***
+
+### 시각화
+```{r}
+plot(history) +
+   scale_x_continuous(limits = c(0, 70))
+```
+
+시각화 했다.
+
+*** 
+
+
+### 예측
+```{r}
+test_predictions <- model %>% predict(test_df %>% select(-label))
+test_predictions[ , 1]
+```
+
+예측했다
+
+***
+
+### 예측값 실제값 비교
+```{r}
+plot(test_predictions, test_labels)
+abline(a=0,b=1,col="blue",lty=1)
+```
+
+그래프 보니 괜찮은듯 하다.
+
+***
+
+### 모델 평가
+```{r}
+c(loss, mae) %<-% (model %>% evaluate(test_df %>% select(-label), test_df$label, verbose = 0))
+paste0("Mean absolute error on test set: $", sprintf("%.2f", mae * 1000))
+```
+
+3294달러의 오차 수준으로 예측하고 있다.
+
+***
+
+# R - 내장 다중 회귀 함수
+### 표준화
+모두 같은 기준으로 데이터를 분석하고 해석하기 위하여 데이터의 범위가 같아지도록 표준화를 진행한다.
+
+`scale`함수를 이용하여 표준화를 하는데, `scale`함수는 *X-Mean(x)/Sd(x)*의 식을 사용하여 표준화 한다.
+
+표준화를 하기 전, 범주형 컬럼과 예측하려는 컬럼을 제거하고 표준화를 진행한다.
+```{r, include=F}
+label <- train_df$label
+label2 <- test_df$label
+```
+
+```{r, include=T}
+train_scale <- train_df[, c(-4,-14)] %>% scale() %>% cbind(label) %>% data.frame()
+head(train_scale)
+
+test_scale <- test_df[, c(-4,-14)] %>% scale() %>%  cbind(label2) %>%  data.frame()
+head(test_scale)
+```
+
+***
+
+### 다중회귀모델 작성
+표준화한 데이터로 다중회귀모델을 작성한다.
+```{r, include=TRUE}
+model <- lm(label ~ ., data = train_scale)
+summary(model)
+```
+다중회귀실시 결과는 INDUS계수와 AGE계수는 유의하지 않은 것으로 나타나고 있다.
+
+변수선택법을 통하여 다시 다중회귀분석을 시행한다.
+
+```{r, include=T}
+model2 <- step(model)
+summary(model2)
+```
+이번 회귀 결과는 모든 회귀계수가 유의하다고 판단되어진다.
+
+따라서, 회귀 결과를 이용하여 분석을 시행하고자 한다.
+
+***
+
+### 독립성 검정
+```{r, include=T}
+dwtest(model2)
+```
+더빈 왓슨 값의 p-value가 0.05이상이므로 독립성 있다고 판단한다.
+
+DW의 값이 1~3 이내이면 잔차에 유의미한 자기 상관이 없다고 판단한다.
+
+*** 
+
+### 등분산성 검정
+```{r, echo=F}
+plot(model2, which = 1)
+```
+
+잔차 0을 기준으로 적합값의 분포가 좌우 균등하면 
+
+잔차들은 등분산성과 차이가 없다고 볼수 있다.
+
+***
+
+### 정규성 검정, 다중 공선성 확인
+```{r}
+model2_residual <- residuals(model2) # 잔차
+shapiro.test(model2_residual) 
+```
+shapiro의 p-value값은 0.05이하이므로 정규분포를 따르지 않는다고 판단한다.
+
+```{r}
+hist(model2_residual, freq = F)
+qqnorm(model2_residual)
+vif(model2) > 10
+```
+
+다중 공선성 문제도 없다고 판단한다.
+
+***
+
+### 예측
+```{r}
+model2_pred <- predict(model2, newdata = test_scale)
+```
+
+
+***
+
+### 예측과 실측값 비교
+```{r}
+plot(model2_pred, test_labels)
+abline(a=0,b=1,col="blue",lty=1)
+```
+
+
+***
+
+### 모델 평가
+```{r}
+mean(abs(model2_pred - test_labels))  
+```
+3.318 * 1000 으로 3318달러의 오차수준으로 예상하고 있다.
+
+
+***
+
+# 결론
+결론이다.
+
+# 참조
+[네이버](www.naver.com)

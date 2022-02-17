@@ -1,0 +1,364 @@
+---
+title: "개와 고양이의 이미지 분류"
+author: "ysi"
+date: '2021 8 14 '
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 소규모 데이터셋 convnet훈련 
+
+소규모의 데이터만 사용하여 이미지 분류 훈련을 하는 것이 일반적이며,
+전문적인 맥락에서 컴퓨터 비전을 수행하게 되면 실제로 이러한 상황을 마주하게 될 것이다. 
+
+샘플이 적다는 것은 상대적인 의미이며,수백개에서 수만개의 이미지를 의미할 수 있다. 실제 사례로 고양이와 개 사진 4000장(고양이 2000장, 개 2000장)이 담긴 데이터 셋에서 이미지를 '개' 또는 '고양이'로 분류할 것이다. 2000장 사진 중 학습용 2000장, 검증용 1000장, 평가용 1000장으로 사용하여 convnet 훈련을 수행하겠다. 
+
+## 소규모 데이터 문제와 딥러닝의 관련성 
+
+훈련하고자하는 network의 크기와 깊이는 상대적인 것이다. 수십개의 샘플로 복잡한 문제를 해셜하기 위한 convnet을 훈련하는 것은 불가능하지만,  모델이 작고 규칙적이며, 작업이 단순하다면 잠재적으로 수 백개의 샘플로 충분할 수 있다. 
+
+convnet은 로컬, 변환 불변형 기능을 학습하기 때문에 지각 문제에 대해 매우 효율적이다. 
+
+매우 적은 이미지 데이터 셋에서 처음부터 convnet 학습을 한다면 사용자 지정 기능 엔지니어링 없이도 상대적으로 데이터가 부족함에도 불구하고 합리적인 결과를 얻을 수 있다.
+
+딥러닝 모델은 본질적으로 용도 변경이 매우 쉽다. 예를 들어, 대규모 데이터셋에서 이미지 분류 또는 음성 대 텍스트 모델을 학습한 후 사소한 변경만으로 상당히 다른 문제에 재사용할 수 있다. 특히, 컴퓨터 비전의 경우, 많은 사전 학습된 모델(일반적으로 ImageNet 데이터셋에 대해 학습됨)을 다운로드할 수 있으며, 매우 적은 데이터에서 강력한 비전 모델을 부트스트랩하는 데 사용할 수 있다.
+
+
+## 데이터셋 다운받기 
+
+원본 데이터 집합은 
+https://www.kaggle.com/c/dogs-vs-cats/data에서 다운로드할 수 있다.
+
+## 훈련, 검증, 테스트 디렉토리에 이미지 복사 
+
+다운받은 데이터 셋의 zip파일을 다음 경로에 압축 해제 한다. 
+경로  = >  C:/Rwork
+훈련,검증 그리고 테스트 디렉토리를 생성한 후 원본 파일이 존재하는 dog-vs-cat 폴더에서 이미지를 복사한다.  
+
+```{r, echo=TRUE, results='hide'}
+setwd("C:/Rwork/")
+original_dataset_dir <- "C:/Rwork/dogs-vs-cats/train"
+
+base_dir <- "C:/Rwork/cat_and_dog_small"
+dir.create(base_dir)
+
+train_dir <- file.path(base_dir, "train")
+dir.create(train_dir)
+
+validation_dir <- file.path(base_dir, "validation")
+dir.create(validation_dir)
+
+test_dir <- file.path(base_dir, "test")
+dir.create(test_dir)
+
+train_cats_dir <- file.path(train_dir, "cats")
+dir.create(train_cats_dir)
+
+train_dogs_dir <- file.path(train_dir, "dogs")
+dir.create(train_dogs_dir)
+
+validation_cats_dir <- file.path(validation_dir, "cats")
+dir.create(validation_cats_dir)
+
+validation_dogs_dir <- file.path(validation_dir, "dogs")
+dir.create(validation_dogs_dir)
+
+test_cats_dir <- file.path(test_dir, "cats")
+dir.create(test_cats_dir)
+
+test_dogs_dir <- file.path(test_dir, "dogs")
+dir.create(test_dogs_dir)
+
+fnames <- paste0("cat.", 2001:3000, ".jpg")
+file.copy(file.path(original_dataset_dir, fnames), 
+          file.path(train_cats_dir)) 
+
+fnames <- paste0("cat.", 3001:3500, ".jpg")
+file.copy(file.path(original_dataset_dir, fnames), 
+          file.path(validation_cats_dir))
+
+fnames <- paste0("cat.", 3501:4000, ".jpg")
+file.copy(file.path(original_dataset_dir, fnames),
+          file.path(test_cats_dir))
+
+fnames <- paste0("dog.", 4001:5000, ".jpg")
+file.copy(file.path(original_dataset_dir, fnames),
+          file.path(train_dogs_dir))
+
+fnames <- paste0("dog.", 5001:5500, ".jpg")
+file.copy(file.path(original_dataset_dir, fnames),
+          file.path(validation_dogs_dir)) 
+
+fnames <- paste0("dog.", 5501:6000, ".jpg")
+file.copy(file.path(original_dataset_dir, fnames),
+          file.path(test_dogs_dir))
+```
+
+
+위의 과정을 통해 잘 분류 되었는지 확인하기 위해 각각의 디렉토리 (학습, 검증, 테스트)에 몇장의 사진이 존재하는지 계산해 보았다. 
+
+```{r}
+cat("total training cat images:", length(list.files(train_cats_dir)), "\n")
+```
+
+```{r}
+cat("total training dog images:", length(list.files(train_dogs_dir)), "\n")
+```
+
+```{r}
+cat("total validation cat images:", length(list.files(validation_cats_dir)), "\n")
+```
+
+```{r}
+cat("total validation dog images:", length(list.files(validation_dogs_dir)), "\n")
+```
+
+```{r}
+cat("total test cat images:", length(list.files(test_cats_dir)), "\n")
+```
+
+```{r}
+ cat("total test dog images:", length(list.files(test_dogs_dir)), "\n")
+```
+
+
+실제로 2000개의 train image, 1000개의 validation image, 1000개의 test image가 존재한다. 각각의 분류에는 각 클래스의 동일한 수의 샘플이 있다.이는 균형잡힌 이항 분류 문제이며, 분류 정확도가 성공의 적절한 척도가 됨을 의미한다. 
+
+## network 구축 
+
+콘넷은 'layer_conv_2d()'('relu' 활성화 포함) 단계와 'layer_max_pooling_2d()' 단계가 번갈아 쌓인다.
+
+그러나 더 큰 이미지와 더 복잡한 문제를 다루기 때문에 network의 크기가 커진다. 즉, 'layer_conv_2d()' + 'layer_max_pooling_2d()' 단계가 하나 더 늘어난다. 이는 network의 용량을 늘리고 피쳐 맵의 크기를 더 줄여 'layer_flatten()'에 도달했을 때 지나치게 크지 않도록 하는 역할을 한다. 여기서 크기 150 × 150(임의 선택)의 입력에서 시작하기 때문에 'layer_flatten()' 바로 전에 크기 7 × 7의 피쳐 맵으로 끝난다.
+
+피쳐 맵의 깊이는 network에서 (32에서 128로) 점진적으로 증가하는 반면, 피쳐 맵의 크기는 (148 × 148에서 7 × 7로) 감소한다. 이건 거의 모든 convnet에서 볼 수 있는 패턴이다.
+
+이진 분류 문제를 공격하기 때문에 단일 단위(크기 1의 'layer_dense')와 'sigmoid' 활성화로 network를 종료한다. 이 단위는 network가 한 클래스 또는 다른 클래스를 보고 있을 확률을 인코딩한다.
+
+# 개와 고양이 분류를 위한 소규모 convnet 인스턴스화 
+
+```{r}
+library(keras)
+
+model <- keras_model_sequential() %>% 
+  layer_conv_2d(filters = 32, kernel_size = c(3, 3), activation = "relu",
+                input_shape = c(150, 150, 3)) %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu") %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_flatten() %>% 
+  layer_dense(units = 512, activation = "relu") %>% 
+  layer_dense(units = 1, activation = "sigmoid")
+```
+
+
+모든 연속적인 레이어에 따라 피쳐 맵의 수치가 어떻게 변하는지 보겠다. 
+
+```{r}
+summary(model)
+```
+
+컴파일 단계에서는 'RMSprop' 옵티마이저를 사용한다. 단일 시그모이드 단위로 network를 종료했기 때문에 이진교차엔트로피를 손실로 사용할 것이다. 
+
+## 학습을 위한 모델 구성 
+
+```{r}
+model %>% compile(
+  loss = "binary_crossentropy",
+  optimizer = optimizer_rmsprop(lr = 1e-4),
+  metrics = c("acc")
+)
+```
+
+## 데이터 전처리 
+
+데이터는 네트워크에 입력되기 전 적절하게 사전처리 된 floating point tensors로 형식이 지정되어야 한다. 현재 데이터는 JPEG 파일로 드라이브에 저장되어 있으므로 네트워크에 데이터를 가져오는 단계는 다음과 같다. 
+
+- 그림파일 읽어오기 
+- JPEG 파일들을 픽셀의 RBG 그리드로 디코딩한다. 
+- 이 값을 floating point tensors로 변환한다. 
+- 픽셀 값 (0 과 255사이)을 [0,1] 간격으로 재조정한다.(신경망은 작은 입력값을 처리하는 것을 선호하기 때문에)
+
+Keras는 이러한 단계를 자동으로 처리할 수 있는 유틸리티가 있다. keras에는 여러 이미지 처리도우미 도구가 포함되어 있으며, 'image_data_generator()'함수가 포함되어 있어 디스크의 이미지 파일을 사전 처리된 tensor 배치로 자동전환 할 수 있다. 이 함수를 사용하여 디렉토리에서 이미지를 읽어올 것이다. 
+
+## image_data_generator: 디렉토리에서 이미지 읽는데 사용 
+```{r}
+# All images will be rescaled by 1/255
+train_datagen <- image_data_generator(rescale = 1/255)
+validation_datagen <- image_data_generator(rescale = 1/255)
+
+train_generator <- flow_images_from_directory(
+  # This is the target directory
+  train_dir,
+  # This is the data generator
+  train_datagen,
+  # All images will be resized to 150x150
+  target_size = c(150, 150),
+  batch_size = 20,
+  # Since we use binary_crossentropy loss, we need binary labels
+  class_mode = "binary"
+)
+
+validation_generator <- flow_images_from_directory(
+  validation_dir,
+  validation_datagen,
+  target_size = c(150, 150),
+  batch_size = 20,
+  class_mode = "binary"
+)
+```
+
+generator의 출력을 살펴보면 150x150 RGB 이미지 배치(모양'(20,150,150,3)), 이진 레이블(모양'(20)')의 배치를 생성한다. 
+각 배치(배치크기)에는 20개의 샘플이 있으며, generator는 이러한 배치를 무한정 생성한다. 대상 폴더의 이미지위로 끝없이 루핑된다. 
+
+```{r}
+batch <- generator_next(train_generator)
+str(batch)
+```
+
+데이터 generator의 적합성에 해당하는 'fit_generator' 함수를 사용하여 모델을 데이터에 적합시켜 보겠다. 
+
+첫 번째 인수로, 다음과 같이 입력과 대상의 배치를 무한정 산출하는 generator를 기대한다. 데이터가 끝없이 생성되기 때문에 생성기는 epoch over를 선언하기 전에 생성기에서 몇 개의 샘플을 가져올 것인지 알아야 한다.
+
+이것이 'steps_per_epoch' 인수의 역할입니다. 생성기에서 'steps_per_epoch' 배치를 가져온 후(즉, 'steps_per_epoch' 경사 하강 단계에 대해 실행한 후) 피팅 프로세스는 다음 epoch로 이동합니다.
+
+이 경우 배치의 크기가 20-표본이므로 표본이 2,000개인 목표값을 확인할 때까지 100개의 배치가 필요합니다.
+
+
+fit_generator를 사용할 경우 fit 함수처럼 'validation_data' 인수를 전달할 수 있습니다.
+
+이 인수는 데이터 generator가 될 수 있지만 배열 목록이 될 수도 있습니다.
+
+생성기를 'validation_data'로 전달하면 이 생성기는 유효성 검사 데이터 배치를 끝없이 생성하므로 프로세스에서 평가를 위해 끌어올 배치 수를 나타내는 'validation_steps' 인수도 지정해야 합니다.
+
+
+
+## 배치 generator를 사용하여 모델 피팅 
+
+```{r, echo=TRUE, results='hide'}
+history <- model %>% fit_generator(
+  train_generator,
+  
+  steps_per_epoch = 100,
+  epochs = 30,
+  validation_data = validation_generator,
+  validation_steps = 50
+)
+```
+
+## 모델 저장 
+
+학습 후에는 항상 모델을 저장하는 것이 좋다. 
+
+```{r}
+model %>% save_model_hdf5("cats_and_dogs_small_1.h5")
+```
+
+## 훈련 중 손실 및 정확도 곡선 그래프 
+
+학습 중 학습 및 검증 데이터에 대한 모델의 손실과 정확도를 그래프로 나타내었다. 
+
+```{r}
+plot(history)
+```
+
+## 학습 및 검증 지표
+
+위의 그래프는 과대 적합의 특성이다. dog-vs-cat 데이터에서 훈련 데이터 정확도는 시간이 지남에 따라 거의 100%에 이를 때까지 선형적으로 증가하는 반면, 검증 데이터 정확도는 75-77%에 머물고 있다. 검증 손실은 15개의  epochs를 지난 후 최소치에 도달했다가 중단되는 반면, 훈련 손실은 거의 0에 도달할 때까지 선형으로 감소한다.
+
+훈련용 샘플(2000개)이 상대적으로 적기 때문에 과적합이 가장 크느 문제가 될 것이다. dropout 및 가중치 감소(L2 정규화)와 같이 과적합을 완화하는 데 도움이 될 수 있는 여러 가지 기술이 있다.
+
+
+## 분류 정확도를 높이기 위한 방법 과 사용자가 조정할 수 있는 parameter
+
+
+정규화 없이 2000개의 학습용 샘플에 대해 학습하여 달성할 수 있는 것에 대한 기준을 설정하는 것으로 시작한다. 이렇게 하면 77%의 분류 정확도를 얻을 수 있다. 
+
+이 때, 주된 문제는 모델의 과적합이다. 모델이 과적합 되는 것을 완화 하기 위한 "데이터 증가" 기술을 사용하여 분류 정확도를 개선할 수 있다. 
+
+소규모 데이터셋에 딥러닝을 적용하기 위한 두가지  필수 기술인 '사전 학습된 network를 사용하여 기능 추출' 과 '사전 학습된 network를 미세 조정'을 이용하여 분류 정확도를 개선할 수 있다. 
+
+앞의 세가지 기술은 소규모 모델을 처음부터 학습하고, 사전 학습된 모델을 사용하여 feature를 추출하고, 사전 학습된 모델을 미세조정하는 것이다. 이 세가지 기술은 소규모 데이터 셋으로 모델 생성을 수행하는 문제를 해결하기 위한 미래 도구 상자가 될 것이다.
+
+## 데이터 증대 
+
+:딥 러닝 모델로 이미지를 처리할 때 거의 보편적으로 사용되는 컴퓨터 비전과 관련된 새로운 기능
+
+과적합은 학습할 샘플이 너무 적어서 새로운 데이터로 일반화할 수 있는 모델을 훈련할 수 없기 때문에 발생한다. 무한한 데이터가 주어진다면 우리 모델은 데이터 분포의 가능한 모든 측면에 노출될 것이다. 즉, 절대 과적합하지 않을 것이다. 데이터 증대는 실제처럼 보이는 이미지를 생성하는 여러 무작위 변환을 통해 샘플을 "증가"시켜 기존 훈련 샘플에서 더 많은 훈련 데이터를 생성하는 접근 방식을 취한다. 목표는 훈련 시간에 모델이 똑같은 이미지를 두번 보지 않도록 하는 것이다. 이를 통해 모델은 데이터의 더 많은 측면에 노출되고 더 잘 일반화 하는데 도움이 된다.
+
+Keras에서는 'image_data_generator()'에서 읽은 이미지에 대해 수행할 여러 임의 변환을 구성하여 이를 수행할 수 있다.
+
+다음은 'image_data_generator()'에서사용 가능한 몇 가지 옵션이다.
+
+* 'rotation_range'는 0~180도 단위의 값으로, 사진을 임의로 회전시킬 수 있는 범위이다.
+* 'width_shift' 및 'height_shift'는 사진을 수직 또는
+수평으로임의로 번역할 수 있는 (총 너비 또는 높이의 일부로) 범위이다.
+
+* 'shear_range'는 전단 변환을 무작위로 적용하기 위한 것 이다.
+* 'zoom_range'는 사진 내부를 무작위로 확대하기 위한 것 이다.
+* 'horizontal_flip'은 사진의 절반을 수평으로 무작위로 뒤집는 것입니다. 수평에 대한 가정이 없을 때 관련된다.
+비대칭(예: 실제 사진)
+* 'fill_mode'는 새로 생성된 픽셀을 채우는 데 사용되는 전략으로, 회전 또는 너비/높이 이동 후에 나타날 수 있다.
+
+
+데이트 증대를 사용하여 새 네트워크를 학습하더라도 네트워크의 입력이 두 배로 증가하지는 않는다. 다만, 보이는입력은 적은 수의 원본이미지에서 가져오기 때문에 여전히 상호 관련이 매우 높다. 새로운 정보를 생성 할 수 없고 기존 정보만 리믹스할 수 있기 때문에 이 정도로는 과적합을 완전히 제거하기에 부족할 수 있다. 과적합을 방지하기 위해, 조밀하게 연결된 분류기 바로 앞에 드롭아웃 레이어를 추가한다.
+
+마지막으로, 네트워크 훈련시 flow_images_from_directory() 함수의 'batch_size'옵션을 조정하고 fit_generator() 함수의 옵션 중 'epochs'와 'steps_per_epoch'를 조정하여 분류 정확도를 높일 수 있다. 
+
+
+
+
+
+
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+## 분류의 정확성을 높이는 방법
+1. 많은 데이터를 모아라
+딥러닝은 데이터가 많을 수록 좋은 성능을 보이게 됩니다. 데이터를 더 구할 수 있는 방법을 찾아보세요. kaggle과 같은 사이트나, "open dataset"이라는 키워드로 검색하면 많은 데이터를 얻을 수 있습니다.
+
+
+2. 데이터를 생성하라
+특정한 데이터에 과적합되지 않고 일반적인 특징을 학습시키기 위해서는 데이터를 생성해서 학습시켜야합니다. 일부러 데이터를 일그러뜨리는 등의 방식으로 데이터를 생성해서 일반적인 특징을 학습시키세요. data augmentation 또는 data generation이라는 키워드로 검색하면 데이터를 생성하는 방법을 공부하실 수 있습니다.
+
+
+3. 데이터를 rescale 하라
+우리는 코끼리가 어떻게 생긴지 알려면 너무 가까이서 보면 안되고, 적당한 거리에서 보아야합니다. 이처럼 인공지능에게 데이터를 학습시킬 때, 항상 적당한 거리에서 데이터를 학습시키기 위해 데이터를 rescale 해야합니다.
+이에 대한 기법으로는 데이터를 0~1로 normalize시키거나 -1~1로 rescale하는 방법 등이 있습니다.
+
+4. 데이터를 변형하라
+지금까지 학습에 사용된 데이터 외에 다른 정보를 추가하거나 다른 방법으로 pre process 처리를 하는 등 데이터를 변형해보세요.
+
+5. 문제를 다르게 보라
+딥러닝을 통해 풀어야하는 문제를 다르게 정의해보세요.
+model을 sub problem을 여러개 풀도록 설계할 수도 있으며, 다른 방식으로 문제를 풀도록 설계할 수 있습니다.
+
+
+
+
+
+##사용자가 조정할 수 있는 파라미터(parameter) 
+파라미터(Parameter)
+- 예측을 할 때 모델에 필요합니다.
+- 그 가치는 문제에 대한 모델의 기술을 정의합니다.
+- 데이터에서 추정되거나 학습됩니다.
+- 시술자가 수동으로 설정하지 않는 경우가 많습니다.
+- 학습된 모델의 일부로 저장되는 경우가 많습니다.
+파라미터는 모델 내부에서 결정되는 변수입니다. 또한 그 값은 데이터로부터 결정됩니다.
+
+하이퍼 파라미터(Hyper parameter)
+- 모델 매개변수를 추정하는 데 도움이 되는 프로세스에서 자주 사용됩니다.
+- 그들은 종종 실무자가 지정합니다.
+- 종종 휴리스틱을 사용하여 설정할 수 있습니다.
+- 그들은 종종 주어진 예측 모델링 문제에 대해 조정됩니다.
+하이퍼 파라미터는 모델링할 때 사용자가 직접 세팅해주는 값을 뜻합니다.
+
+파라미터(Parameter)와 하이퍼 파라미터(Hyper parameter)를 구분하는 기준은 사용자가 직접 설정하느냐 아니냐입니다. 사용자가 직접 설정하면 하이퍼 파라미터, 모델 혹은 데이터에 의해 결정되면 파라미터입니다.
+
+
